@@ -1,0 +1,131 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alloy
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/proxy
+  - services
+  - endpoints
+  - pods
+  - pods/log
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alloy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy
+subjects:
+- kind: ServiceAccount
+  name: alloy
+  namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: monitoring
+data:
+  config.river: |
+    logging {
+      level = "info"
+      format = "logfmt"
+    }
+
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+
+    loki.source.kubernetes "pod_logs" {
+      targets    = discovery.kubernetes.pods.targets
+      forward_to = [loki.process.multiline_stage.receiver]
+    }
+
+    loki.process "multiline_stage" {
+      forward_to = [loki.write.local.receiver]
+
+      // 1. Multiline
+      stage.multiline {
+        firstline = `^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}`
+        max_wait_time = "3s"
+      }
+
+      // 2. Regex (Label Extraction)
+      // Extract [ LEVEL ]
+      stage.regex {
+        expression = `.*\[\s*(?P<level>[A-Z]+)\s*\].*`
+      }
+
+      // 3. Labels
+      stage.labels {
+        values = {
+          "log_level" = "level",
+        }
+      }
+    }
+
+    loki.write "local" {
+      endpoint {
+        url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
+      }
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: alloy
+  template:
+    metadata:
+      labels:
+        app: alloy
+    spec:
+      serviceAccountName: alloy
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.0.0
+          args:
+            - run
+            - /etc/alloy/config.river
+            - --storage.path=/tmp/alloy
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+            - name: varlog
+              mountPath: /var/log
+            - name: varlibdocker
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+          env:
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-config
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: varlibdocker
+          hostPath:
+            path: /var/lib/docker/containers

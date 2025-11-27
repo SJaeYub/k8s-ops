@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: log-script
+  namespace: monitoring
+data:
+  app.py: |
+    import time
+    import datetime
+    import random
+    import os
+    import threading
+    import sys
+
+    # OpenTelemetry Imports
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.trace import Status, StatusCode
+
+    # Setup OpenTelemetry
+    resource = Resource(attributes={"service.name": "log-generator"})
+    provider = TracerProvider(resource=resource)
+    
+    # OTLP Exporter -> Tempo
+    # Endpoint must include /v1/traces for HTTP exporter
+    processor = BatchSpanProcessor(OTLPSpanExporter(endpoint="http://tempo.monitoring.svc:4318/v1/traces"))
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+    tracer = trace.get_tracer(__name__)
+
+    pid = os.getpid()
+    
+    def log_loop():
+        while True:
+            # Start a new Span
+            with tracer.start_as_current_span("process_request") as span:
+                # Get Trace ID from current span
+                trace_id = format(span.get_span_context().trace_id, "032x")
+                
+                now = datetime.datetime.now()
+                ts = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                
+                if random.random() < 0.2:
+                    level = "ERROR"
+                    span.set_status(Status(StatusCode.ERROR))
+                    span.set_attribute("error", True)
+                    print(f"{ts} [{level:>5}] {pid} --- [main] com.example.TestApp:Critical failure trace_id={trace_id}", flush=True)
+                    try:
+                        raise ValueError("Simulated NullPointerException")
+                    except ValueError as e:
+                        import traceback
+                        traceback.print_exc(file=sys.stdout)
+                        span.record_exception(e)
+                else:
+                    level = "INFO"
+                    print(f"{ts} [{level:>5}] {pid} --- [main] com.example.TestApp:Processing request trace_id={trace_id}", flush=True)
+            
+            time.sleep(2)
+
+    if __name__ == "__main__":
+        print("Starting Log Generator with OTEL...", flush=True)
+        t = threading.Thread(target=log_loop, name="main")
+        t.start()
+        t.join()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-generator
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-generator
+  template:
+    metadata:
+      labels:
+        app: log-generator
+    spec:
+      containers:
+        - name: python-logger
+          image: python:3.9-slim
+          # Install OTEL libraries before running the script
+          command: ["/bin/sh", "-c"]
+          args:
+            - pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp && python -u /app/app.py
+          volumeMounts:
+            - name: script-vol
+              mountPath: /app
+      volumes:
+        - name: script-vol
+          configMap:
+            name: log-script
