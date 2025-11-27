@@ -47,7 +47,8 @@ data:
                     level = "ERROR"
                     span.set_status(Status(StatusCode.ERROR))
                     span.set_attribute("error", True)
-                    print(f"{ts} [{level:>5}] {pid} --- [main] com.example.TestApp:Critical failure trace_id={trace_id}", flush=True)
+                    # 로그 포맷 변경: traceId: <TraceID>
+                    print(f"{ts} [{level:>5}] {pid} --- [main] com.example.TestApp:Critical failure traceId: {trace_id}", flush=True)
                     try:
                         raise ValueError("Simulated NullPointerException")
                     except ValueError as e:
@@ -56,7 +57,8 @@ data:
                         span.record_exception(e)
                 else:
                     level = "INFO"
-                    print(f"{ts} [{level:>5}] {pid} --- [main] com.example.TestApp:Processing request trace_id={trace_id}", flush=True)
+                    # 로그 포맷 변경: traceId: <TraceID>
+                    print(f"{ts} [{level:>5}] {pid} --- [main] com.example.TestApp:Processing request traceId: {trace_id}", flush=True)
             
             time.sleep(2)
 
@@ -84,7 +86,6 @@ spec:
       containers:
         - name: python-logger
           image: python:3.9-slim
-          # Install OTEL libraries before running the script
           command: ["/bin/sh", "-c"]
           args:
             - pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp && python -u /app/app.py
