@@ -7,6 +7,13 @@ data:
   datasource.yaml: |
     apiVersion: 1
     datasources:
+    - name: Prometheus
+      type: prometheus
+      access: proxy
+      url: http://prometheus.monitoring.svc:9090
+      version: 1
+      editable: true
+
     - name: Tempo
       type: tempo
       access: proxy
@@ -23,7 +30,6 @@ data:
       isDefault: true
       jsonData:
         derivedFields:
-          # 로그에서 "traceId: xxxx" 패턴을 찾도록 정규식 수정
           - datasourceUid: Tempo
             matcherRegex: "traceId: (\\w+)"
             name: TraceID
