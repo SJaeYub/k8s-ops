@@ -23,8 +23,9 @@ data:
       isDefault: true
       jsonData:
         derivedFields:
+          # 로그에서 "traceId: xxxx" 패턴을 찾도록 정규식 수정
           - datasourceUid: Tempo
-            matcherRegex: "trace_id=(\\w+)"
+            matcherRegex: "traceId: (\\w+)"
             name: TraceID
             url: "$${__value.raw}"
 ---
