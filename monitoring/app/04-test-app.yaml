@@ -74,7 +74,7 @@ metadata:
   name: log-generator
   namespace: monitoring
 spec:
-  replicas: 1
+  replicas: 0 # 레플리카 수를 0으로 변경하여 파드를 종료
   selector:
     matchLabels:
       app: log-generator
