@@ -62,11 +62,34 @@ spec:
       containers:
       - name: jenkins
         image: jenkins/jenkins:lts
+        securityContext:
+          runAsUser: 0
         ports:
         - containerPort: 8080
           name: http
         - containerPort: 50000
           name: agent
+        env:
+        - name: DOCKER_HOST
+          value: tcp://localhost:2375
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          apt-get update && apt-get install -y docker.io && \
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+          chmod +x kubectl && mv kubectl /usr/local/bin/ && \
+          /usr/bin/tini -- /usr/local/bin/jenkins.sh
+        volumeMounts:
+        - name: jenkins-data
+          mountPath: /var/jenkins_home
+      - name: dind
+        image: docker:24.0.6-dind
+        securityContext:
+          privileged: true
+        env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+        args: ["--insecure-registry=192.168.204.138:32533"]
         volumeMounts:
         - name: jenkins-data
           mountPath: /var/jenkins_home
