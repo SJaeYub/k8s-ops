@@ -20,31 +20,37 @@ data:
     public class App {
         public static void main(String[] args) {
             System.out.println("Starting Java Query Tester...");
-            String url = "jdbc:mysql://mysql.db.svc:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true";
+            // 초기 연결 시에는 데이터베이스를 지정하지 않음
+            String urlWithoutDb = "jdbc:mysql://mysql.db.svc:3306/?useSSL=false&allowPublicKeyRetrieval=true";
+            String urlWithDb = "jdbc:mysql://mysql.db.svc:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true";
             String user = "root";
-            String password = "rootpassword123!";
+            String password = "rootpassword123!"; // MySQL root password
             Random random = new Random();
 
             try {
                 Class.forName("com.mysql.cj.jdbc.Driver");
-                try (Connection conn = DriverManager.getConnection(url, user, password)) {
+                
+                // 1. 초기 연결하여 데이터베이스 생성 및 테이블 생성
+                try (Connection conn = DriverManager.getConnection(urlWithoutDb, user, password)) {
                     try (Statement stmt = conn.createStatement()) {
-                        stmt.execute("CREATE DATABASE IF NOT EXISTS testdb");
-                        stmt.execute("USE testdb");
+                        stmt.execute("CREATE DATABASE IF NOT EXISTS testdb"); // 데이터베이스 먼저 생성
+                        stmt.execute("USE testdb"); // 생성 후 사용
                         stmt.execute("CREATE TABLE IF NOT EXISTS logs (id INT AUTO_INCREMENT PRIMARY KEY, message VARCHAR(255))");
                     }
                 }
 
+                // 2. 반복 루프: 이제 testdb에 연결하여 쿼리 실행
                 while (true) {
-                    try (Connection conn = DriverManager.getConnection(url, user, password)) {
-                        conn.setCatalog("testdb");
+                    try (Connection conn = DriverManager.getConnection(urlWithDb, user, password)) {
                         
+                        // INSERT
                         String insertQuery = "INSERT INTO logs (message) VALUES (?)";
                         try (PreparedStatement pstmt = conn.prepareStatement(insertQuery)) {
                             pstmt.setString(1, "Log entry " + random.nextInt(1000));
                             pstmt.executeUpdate();
                         }
 
+                        // SELECT
                         String selectQuery = "SELECT * FROM logs ORDER BY id DESC LIMIT 1";
                         try (Statement stmt = conn.createStatement();
                              ResultSet rs = stmt.executeQuery(selectQuery)) {
@@ -53,6 +59,7 @@ data:
                             }
                         }
                         
+                        // Log with TraceID
                         String traceId = Span.current().getSpanContext().getTraceId();
                         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
                         System.out.printf("%s [ INFO] %d --- [main] App:Executed queries traceId: %s%n", ts, ProcessHandle.current().pid(), traceId);
