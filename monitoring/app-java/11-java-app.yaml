@@ -40,17 +40,36 @@ data:
                 while (true) {
                     try (Connection conn = DriverManager.getConnection(urlWithDb, user, password)) {
                         
+                        // INSERT (PreparedStatement)
                         String insertQuery = "INSERT INTO logs (message) VALUES (?)";
                         try (PreparedStatement pstmt = conn.prepareStatement(insertQuery)) {
-                            pstmt.setString(1, "Log entry " + random.nextInt(1000));
+                            String msg = "Log entry " + random.nextInt(1000);
+                            pstmt.setString(1, msg);
+                            
+                            // [Manual Instrumentation] Capture full SQL with values
+                            // MySQL driver's toString() returns: "com.mysql.cj.jdbc.ClientPreparedStatement: INSERT ... VALUES ('...'))"
+                            String fullSql = pstmt.toString();
+                            int sqlIndex = fullSql.indexOf(": ");
+                            if (sqlIndex > 0) {
+                                fullSql = fullSql.substring(sqlIndex + 2);
+                            }
+                            // Overwrite db.statement attribute
+                            Span.current().setAttribute("db.statement", fullSql);
+                            
                             pstmt.executeUpdate();
                         }
 
+                        // SELECT (Statement)
+                        // Statement usually contains literals directly, but let's capture it explicitly too if needed.
                         String selectQuery = "SELECT * FROM logs ORDER BY id DESC LIMIT 1";
-                        try (Statement stmt = conn.createStatement();
-                             ResultSet rs = stmt.executeQuery(selectQuery)) {
-                            if (rs.next()) {
-                                String msg = rs.getString("message");
+                        try (Statement stmt = conn.createStatement()) {
+                            // For standard Statement, the query string itself is the full SQL
+                            Span.current().setAttribute("db.statement", selectQuery);
+                            
+                            try (ResultSet rs = stmt.executeQuery(selectQuery)) {
+                                if (rs.next()) {
+                                    String msg = rs.getString("message");
+                                }
                             }
                         }
                         
@@ -106,24 +125,26 @@ spec:
         - |
           javac -cp /libs/opentelemetry-api.jar:/libs/opentelemetry-context.jar /app/App.java -d /app
           
-          # Add OTEL API/Context jars to classpath
+          # Ensure opentelemetry-api is in the classpath at runtime so App can call Span.current()
           java -javaagent:/libs/opentelemetry-javaagent.jar \
                -cp /app:/libs/mysql-connector-j.jar:/libs/opentelemetry-api.jar:/libs/opentelemetry-context.jar \
                App
         env:
         - name: OTEL_TRACES_EXPORTER
           value: "otlp"
-        - name: OTEL_METRICS_EXPORTER # Disable metrics to avoid 404 from Tempo
+        - name: OTEL_METRICS_EXPORTER
           value: "none"
-        - name: OTEL_LOGS_EXPORTER # Disable logs exporter (we use stdout)
+        - name: OTEL_LOGS_EXPORTER
           value: "none"
-        - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT # Explicitly set traces endpoint
+        - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
           value: "http://tempo.monitoring.svc:4318/v1/traces"
         - name: OTEL_EXPORTER_OTLP_PROTOCOL
           value: "http/protobuf"
         - name: OTEL_SERVICE_NAME
           value: "java-query-tester"
         - name: OTEL_INSTRUMENTATION_JDBC_STATEMENT_SANITIZER_ENABLED
+          value: "false"
+        - name: OTEL_INSTRUMENTATION_COMMON_DB_STATEMENT_SANITIZER_ENABLED
           value: "false"
         volumeMounts:
         - name: source
