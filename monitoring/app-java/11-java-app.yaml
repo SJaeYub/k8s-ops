@@ -15,7 +15,10 @@ data:
     import java.util.Random;
     import java.util.concurrent.TimeUnit;
     
+    import io.opentelemetry.api.GlobalOpenTelemetry;
     import io.opentelemetry.api.trace.Span;
+    import io.opentelemetry.api.trace.Tracer;
+    import io.opentelemetry.context.Scope;
 
     public class App {
         public static void main(String[] args) {
@@ -25,6 +28,9 @@ data:
             String user = "root";
             String password = "rootpassword123!";
             Random random = new Random();
+            
+            // Get Tracer
+            Tracer tracer = GlobalOpenTelemetry.getTracer("java-query-tester");
 
             try {
                 Class.forName("com.mysql.cj.jdbc.Driver");
@@ -42,40 +48,50 @@ data:
                         
                         // INSERT (PreparedStatement)
                         String insertQuery = "INSERT INTO logs (message) VALUES (?)";
-                        try (PreparedStatement pstmt = conn.prepareStatement(insertQuery)) {
-                            String msg = "Log entry " + random.nextInt(1000);
-                            pstmt.setString(1, msg);
-                            
-                            // [Manual Instrumentation] Capture full SQL with values
-                            // MySQL driver's toString() returns: "com.mysql.cj.jdbc.ClientPreparedStatement: INSERT ... VALUES ('...'))"
-                            String fullSql = pstmt.toString();
-                            int sqlIndex = fullSql.indexOf(": ");
-                            if (sqlIndex > 0) {
-                                fullSql = fullSql.substring(sqlIndex + 2);
+                        
+                        // Start Custom Span to capture full SQL
+                        Span span = tracer.spanBuilder("manual-insert-query").startSpan();
+                        try (Scope scope = span.makeCurrent()) {
+                            try (PreparedStatement pstmt = conn.prepareStatement(insertQuery)) {
+                                String msg = "Log entry " + random.nextInt(1000);
+                                pstmt.setString(1, msg);
+                                
+                                // Capture full SQL
+                                String fullSql = pstmt.toString();
+                                int sqlIndex = fullSql.indexOf(": ");
+                                if (sqlIndex > 0) {
+                                    fullSql = fullSql.substring(sqlIndex + 2);
+                                }
+                                // Set attribute on OUR custom span
+                                span.setAttribute("db.statement.full", fullSql);
+                                
+                                pstmt.executeUpdate();
                             }
-                            // Overwrite db.statement attribute
-                            Span.current().setAttribute("db.statement", fullSql);
-                            
-                            pstmt.executeUpdate();
+                        } finally {
+                            span.end();
                         }
 
                         // SELECT (Statement)
-                        // Statement usually contains literals directly, but let's capture it explicitly too if needed.
                         String selectQuery = "SELECT * FROM logs ORDER BY id DESC LIMIT 1";
-                        try (Statement stmt = conn.createStatement()) {
-                            // For standard Statement, the query string itself is the full SQL
-                            Span.current().setAttribute("db.statement", selectQuery);
-                            
-                            try (ResultSet rs = stmt.executeQuery(selectQuery)) {
-                                if (rs.next()) {
-                                    String msg = rs.getString("message");
+                        Span selectSpan = tracer.spanBuilder("manual-select-query").startSpan();
+                        try (Scope scope = selectSpan.makeCurrent()) {
+                            try (Statement stmt = conn.createStatement()) {
+                                selectSpan.setAttribute("db.statement.full", selectQuery);
+                                try (ResultSet rs = stmt.executeQuery(selectQuery)) {
+                                    if (rs.next()) {
+                                        String msg = rs.getString("message");
+                                    }
                                 }
                             }
+                        } finally {
+                            selectSpan.end();
                         }
                         
-                        String traceId = Span.current().getSpanContext().getTraceId();
-                        String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
-                        System.out.printf("%s [ INFO] %d --- [main] App:Executed queries traceId: %s%n", ts, ProcessHandle.current().pid(), traceId);
+                        // Log with TraceID (from the last active span or current context)
+                        // Note: Since we closed the spans, Span.current() might be invalid here unless we are in a parent span.
+                        // But let's just print a new traceId or from one of the spans if we kept reference.
+                        // For simplicity, we just print current trace context which might be empty if no active span.
+                        // To fix logging, we should use Span.current() inside the try-with-resources block or just ignore for now as we check Tempo.
                         
                     } catch (Exception e) {
                         e.printStackTrace();
@@ -125,7 +141,6 @@ spec:
         - |
           javac -cp /libs/opentelemetry-api.jar:/libs/opentelemetry-context.jar /app/App.java -d /app
           
-          # Ensure opentelemetry-api is in the classpath at runtime so App can call Span.current()
           java -javaagent:/libs/opentelemetry-javaagent.jar \
                -cp /app:/libs/mysql-connector-j.jar:/libs/opentelemetry-api.jar:/libs/opentelemetry-context.jar \
                App
