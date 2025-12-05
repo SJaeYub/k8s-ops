@@ -15,14 +15,7 @@ data:
     import java.util.Random;
     import java.util.concurrent.TimeUnit;
     
-    // OpenTelemetry API (Agent가 클래스패스에 주입해줌, 컴파일 위해 필요할 수 있으나 
-    // 여기서는 Agent 방식이므로 런타임에 해결되거나, 단순 로깅용 traceId는 MDC나 직접 파싱해야 함.
-    // 하지만 컴파일 타임 의존성 없이 Agent만으로는 코드 내에서 traceId를 가져오기 어렵습니다.
-    // 따라서 여기서는 간편하게 'System.out' 로그에 traceId를 찍기 위해 
-    // OTEL API jar도 같이 다운로드해서 컴파일 시 사용하거나, 
-    // Agent가 로그 포맷을 자동으로 주입(Log Injection)하도록 설정하는 것이 좋습니다.
-    // 여기서는 가장 확실한 방법으로 OTEL API를 사용하여 TraceID를 가져옵니다.
-    
+    // OpenTelemetry API
     import io.opentelemetry.api.trace.Span;
 
     public class App {
@@ -30,7 +23,7 @@ data:
             System.out.println("Starting Java Query Tester...");
             String url = "jdbc:mysql://mysql.db.svc:3306/testdb?useSSL=false&allowPublicKeyRetrieval=true";
             String user = "root";
-            String password = "rootpassword123!";
+            String password = "rootpassword123!"; // MySQL root password
             Random random = new Random();
 
             try {
@@ -112,7 +105,7 @@ spec:
           mountPath: /libs
       containers:
       - name: java-app
-        image: openjdk:17-jdk-slim
+        image: openjdk:17-jdk # 이미지 변경: openjdk:17-jdk-slim -> openjdk:17-jdk
         command: ["/bin/sh", "-c"]
         args:
         - |
