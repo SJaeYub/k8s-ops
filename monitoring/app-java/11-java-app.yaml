@@ -29,7 +29,6 @@ data:
             String password = "rootpassword123!";
             Random random = new Random();
             
-            // Get Tracer
             Tracer tracer = GlobalOpenTelemetry.getTracer("java-query-tester");
 
             try {
@@ -46,23 +45,19 @@ data:
                 while (true) {
                     try (Connection conn = DriverManager.getConnection(urlWithDb, user, password)) {
                         
-                        // INSERT (PreparedStatement)
                         String insertQuery = "INSERT INTO logs (message) VALUES (?)";
                         
-                        // Start Custom Span to capture full SQL
                         Span span = tracer.spanBuilder("manual-insert-query").startSpan();
                         try (Scope scope = span.makeCurrent()) {
                             try (PreparedStatement pstmt = conn.prepareStatement(insertQuery)) {
                                 String msg = "Log entry " + random.nextInt(1000);
                                 pstmt.setString(1, msg);
                                 
-                                // Capture full SQL
                                 String fullSql = pstmt.toString();
                                 int sqlIndex = fullSql.indexOf(": ");
                                 if (sqlIndex > 0) {
                                     fullSql = fullSql.substring(sqlIndex + 2);
                                 }
-                                // Set attribute on OUR custom span
                                 span.setAttribute("db.statement.full", fullSql);
                                 
                                 pstmt.executeUpdate();
@@ -71,7 +66,6 @@ data:
                             span.end();
                         }
 
-                        // SELECT (Statement)
                         String selectQuery = "SELECT * FROM logs ORDER BY id DESC LIMIT 1";
                         Span selectSpan = tracer.spanBuilder("manual-select-query").startSpan();
                         try (Scope scope = selectSpan.makeCurrent()) {
@@ -86,12 +80,6 @@ data:
                         } finally {
                             selectSpan.end();
                         }
-                        
-                        // Log with TraceID (from the last active span or current context)
-                        // Note: Since we closed the spans, Span.current() might be invalid here unless we are in a parent span.
-                        // But let's just print a new traceId or from one of the spans if we kept reference.
-                        // For simplicity, we just print current trace context which might be empty if no active span.
-                        // To fix logging, we should use Span.current() inside the try-with-resources block or just ignore for now as we check Tempo.
                         
                     } catch (Exception e) {
                         e.printStackTrace();
@@ -120,6 +108,8 @@ spec:
       labels:
         app: java-query-tester
     spec:
+      nodeSelector: # Worker 1로 고정
+        kubernetes.io/hostname: kuberworkersvr1
       initContainers:
       - name: download-libs
         image: busybox
