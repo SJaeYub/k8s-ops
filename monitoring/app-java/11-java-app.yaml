@@ -45,6 +45,7 @@ data:
                 while (true) {
                     try (Connection conn = DriverManager.getConnection(urlWithDb, user, password)) {
                         
+                        // INSERT (PreparedStatement)
                         String insertQuery = "INSERT INTO logs (message) VALUES (?)";
                         
                         Span span = tracer.spanBuilder("manual-insert-query").startSpan();
@@ -53,12 +54,14 @@ data:
                                 String msg = "Log entry " + random.nextInt(1000);
                                 pstmt.setString(1, msg);
                                 
+                                // Capture full SQL
                                 String fullSql = pstmt.toString();
                                 int sqlIndex = fullSql.indexOf(": ");
                                 if (sqlIndex > 0) {
                                     fullSql = fullSql.substring(sqlIndex + 2);
                                 }
-                                span.setAttribute("db.statement.full", fullSql);
+                                // Overwrite the default 'db.statement' attribute with full SQL
+                                span.setAttribute("db.statement", fullSql);
                                 
                                 pstmt.executeUpdate();
                             }
@@ -66,11 +69,14 @@ data:
                             span.end();
                         }
 
+                        // SELECT (Statement)
                         String selectQuery = "SELECT * FROM logs ORDER BY id DESC LIMIT 1";
                         Span selectSpan = tracer.spanBuilder("manual-select-query").startSpan();
                         try (Scope scope = selectSpan.makeCurrent()) {
                             try (Statement stmt = conn.createStatement()) {
-                                selectSpan.setAttribute("db.statement.full", selectQuery);
+                                // Overwrite the default 'db.statement' attribute with full SQL
+                                selectSpan.setAttribute("db.statement", selectQuery);
+                                
                                 try (ResultSet rs = stmt.executeQuery(selectQuery)) {
                                     if (rs.next()) {
                                         String msg = rs.getString("message");
@@ -108,8 +114,6 @@ spec:
       labels:
         app: java-query-tester
     spec:
-      nodeSelector: # Worker 1로 고정
-        kubernetes.io/hostname: kuberworkersvr1
       initContainers:
       - name: download-libs
         image: busybox
