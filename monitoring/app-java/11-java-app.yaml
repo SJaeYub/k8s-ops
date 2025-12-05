@@ -15,7 +15,7 @@ data:
     import java.util.Random;
     import java.util.concurrent.TimeUnit;
     
-    import io.opentelemetry.api.trace.Span; // Keep for compilation
+    import io.opentelemetry.api.trace.Span;
 
     public class App {
         public static void main(String[] args) {
@@ -54,8 +54,6 @@ data:
                             }
                         }
                         
-                        // Log with TraceID: relying on Agent to instrument System.out or other logging framework
-                        // If direct Span.current() fails, we need to use a logging framework with OTEL appender
                         String traceId = Span.current().getSpanContext().getTraceId();
                         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
                         System.out.printf("%s [ INFO] %d --- [main] App:Executed queries traceId: %s%n", ts, ProcessHandle.current().pid(), traceId);
@@ -106,19 +104,22 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
-          # Compile (Classpath: OTEL API and Context Jars for compile-time dependency)
           javac -cp /libs/opentelemetry-api.jar:/libs/opentelemetry-context.jar /app/App.java -d /app
           
-          # Run (Agent + App, relying on Agent to provide OTEL API at runtime)
+          # Add OTEL API/Context jars to classpath
           java -javaagent:/libs/opentelemetry-javaagent.jar \
-               -cp /app:/libs/mysql-connector-j.jar \
+               -cp /app:/libs/mysql-connector-j.jar:/libs/opentelemetry-api.jar:/libs/opentelemetry-context.jar \
                App
         env:
         - name: OTEL_TRACES_EXPORTER
           value: "otlp"
-        - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: "http://tempo.monitoring.svc:4318"
-        - name: OTEL_EXPORTER_OTLP_PROTOCOL # Explicitly set protocol to HTTP
+        - name: OTEL_METRICS_EXPORTER # Disable metrics to avoid 404 from Tempo
+          value: "none"
+        - name: OTEL_LOGS_EXPORTER # Disable logs exporter (we use stdout)
+          value: "none"
+        - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT # Explicitly set traces endpoint
+          value: "http://tempo.monitoring.svc:4318/v1/traces"
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
           value: "http/protobuf"
         - name: OTEL_SERVICE_NAME
           value: "java-query-tester"
